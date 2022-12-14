@@ -24,7 +24,7 @@ import {
     toUtf8Bytes
 } from "ethers/lib/utils";
 import {fromRpcSig, toCompactSig} from "ethereumjs-util";
-import {hexToU8a, u8aToHex} from "@polkadot/util";
+import {hexToU8a, u8aToHex, u8aToU8a} from "@polkadot/util";
 let elliptic = require('elliptic');
 let ec = new elliptic.ec('secp256k1');
 
@@ -101,7 +101,6 @@ function Profile() {
                     specVersion,
                     metadataRpc,
                 });
-                console.log("here")
                 const compressPubicKey= secp256k1Compress(arrayify(publicKey))
                 console.log("compressed public key u8", arrayify(compressPubicKey))
                 console.log({compressPubicKey})
@@ -111,14 +110,14 @@ function Profile() {
                 console.log("substrate addr", substrateAdder);
 
                 const keyring = new Keyring()
-               const alice = keyring.addFromUri('//Alice', { name: 'Alice' }, 'sr25519');
+                const alice = keyring.addFromUri('//Alice', { name: 'Alice' }, 'ecdsa');
                 const unsigned = methods.balances.transferKeepAlive(
                     {
                         value: '10000000000',
                         dest: '14E5nqKAp3oAJcmzgZhUD2RcptBeUBScxKHgJKU4HPNcKVf3', // Bob
                     },
                     {
-                        address:  alice.address, //substrateAdder,
+                        address: substrateAdder, //,
                         blockHash,
                         blockNumber: registry
                             .createType('BlockNumber', block.header.number)
@@ -136,7 +135,6 @@ function Profile() {
                         registry,
                     }
                 );
-                console.log("here2")
                 const signingPayload = construct.signingPayload(unsigned, { registry });
                 registry.setMetadata(createMetadata(registry, metadataRpc));
                 const extrinsicPayload = registry
@@ -144,30 +142,31 @@ function Profile() {
                         version: EXTRINSIC_VERSION,
                     })
                 const u8a = extrinsicPayload.toU8a({ method: true })
-                console.log("payload:", u8a.length);
+                console.log("payload:", u8a);
                 console.log("signing payload", signingPayload)
-                console.log("u8a", u8a)
+                console.log(registry.hash)
                 const encoded = u8a.length > 256
-                    ? registry.hash(u8a)
+                    ? blake2AsU8a(u8a)
                     : u8a;
                 console.log("payloadHash", encoded.toString())
-                let signatureEcdsa = await web3.eth.personal.sign(u8aToHex(encoded), accounts[0],"password");
+                console.log("something", u8aToU8a(encoded).toString())
+                let signatureEcdsa = await web3.eth.sign(u8aToHex(blake2AsU8a(encoded)), accounts[0]);
                 console.log("signature ecdsa", signatureEcdsa)
-                const signatureU8= arrayify(signatureEcdsa)
-                signatureU8[signatureU8.length-1]-=27;
-                signatureEcdsa= hexlify(signatureU8);
-                console.log("signature u8 mutated", signatureU8)
-                console.log("signature after mutation", signatureEcdsa)
+                const signatureEcdsaU8= arrayify(signatureEcdsa)
+                signatureEcdsaU8[signatureEcdsaU8.length-1]-=27;
+                console.log("signature u8 mutated", signatureEcdsaU8)
+                console.log("signature hex mutated", hexlify(signatureEcdsaU8))
                 console.log("signature buffer", toUtf8Bytes(signatureEcdsa).length)
 
                 //alice signature
-                let signature1 = u8aToHex(alice.sign(encoded,{withType:true}));
+                //console.log(alice.sign)
+                //let signature1 = u8aToHex(alice.sign(encoded,{withType:true}));
                 //console.log(extrinsicPayload.inner.sign)
 
                 //create multi-signature
-                const signature = api.createType("MultiSignature", {ecdsa: signatureEcdsa})
-                // console.log("signature", signature.toHex())
-                const tx = construct.signedTx(unsigned, signature1, {
+                const multiSignature = api.createType("MultiSignature", {ecdsa: signatureEcdsaU8})
+                console.log("multiSignature", multiSignature.toHex())
+                const tx = construct.signedTx(unsigned, multiSignature.toHex(), {
                     metadataRpc,
                     registry,
                 });
