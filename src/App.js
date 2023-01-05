@@ -81,26 +81,6 @@ function Profile() {
                 await cryptoWaitReady();
                 const provider= new WsProvider("wss://polkadot.api.onfinality.io/public-ws")
                 const api = await ApiPromise.create({provider})
-                    // Construct a balance transfer transaction offline.
-                    // To construct the tx, we need some up-to-date information from the node.
-                    // `txwrapper` is offline-only, so does not care how you retrieve this info.
-                    // In this tutorial, we simply send RPC requests to the node.
-                const { block } = (await api.rpc.chain.getBlock()).toJSON()
-                console.log("block", block)
-                const blockHash = (await api.rpc.chain.getBlockHash()).toJSON()
-                console.log("block hash", blockHash)
-                const genesisHash = (await api.rpc.chain.getBlockHash(0)).toJSON()
-                console.log("genesis hash", genesisHash)
-                const metadataRpc = (await api.rpc.state.getMetadata()).toJSON()
-                console.log("metadata", metadataRpc)
-                const { specVersion, transactionVersion, specName } = (await api.rpc.state.getRuntimeVersion()).toJSON()
-                console.log("runtime versions", { specVersion, transactionVersion, specName })
-                const registry = getRegistry({
-                    chainName: 'Polkadot',
-                    specName,
-                    specVersion,
-                    metadataRpc,
-                });
                 const compressPubicKey= secp256k1Compress(arrayify(publicKey))
                 console.log("compressed public key u8", arrayify(compressPubicKey))
                 console.log({compressPubicKey})
@@ -109,42 +89,20 @@ function Profile() {
                 const substrateAdder= encodeAddress(accountId32,0)
                 console.log("substrate addr", substrateAdder);
 
-                const keyring = new Keyring()
-                const alice = keyring.addFromUri('//Alice', { name: 'Alice' }, 'ecdsa');
-                const unsigned = methods.balances.transferKeepAlive(
-                    {
-                        value: '10000000000',
-                        dest: '14E5nqKAp3oAJcmzgZhUD2RcptBeUBScxKHgJKU4HPNcKVf3', // Bob
-                    },
-                    {
-                        address: substrateAdder, //,
-                        blockHash,
-                        blockNumber: registry
-                            .createType('BlockNumber', block.header.number)
-                            .toNumber(),
-                        eraPeriod: 64,
-                        genesisHash,
-                        metadataRpc,
-                        nonce: 1, // Assuming this is Alice's first tx on the chain
-                        specVersion,
-                        tip: 0,
-                        transactionVersion,
-                    },
-                    {
-                        metadataRpc,
-                        registry,
-                    }
-                );
-                const signingPayload = construct.signingPayload(unsigned, { registry });
-                registry.setMetadata(createMetadata(registry, metadataRpc));
-                const extrinsicPayload = registry
-                    .createType('ExtrinsicPayload', signingPayload, {
-                        version: EXTRINSIC_VERSION,
-                    })
+                const apiTx = api.tx.balances.transfer('5GNJqTPyNqANBkUVMN1LPPrxXnFouWXoe2wNSmmEoLctxiZY', 12345678)
+                const {nonce} = (await api.query.system.account(substrateAdder)).toJSON()
+                const signingPayload = api.createType('SignerPayload', {
+                    method: apiTx,
+                    nonce: nonce+1,
+                    genesisHash: api.genesisHash,
+                    blockHash: api.genesisHash,
+                    runtimeVersion: api.runtimeVersion,
+                    version: api.extrinsicVersion
+                });
+                const extrinsicPayload = api.createType('ExtrinsicPayload', signingPayload.toPayload(), { version: api.extrinsicVersion })
                 const u8a = extrinsicPayload.toU8a({ method: true })
                 console.log("payload:", u8a);
                 console.log("signing payload", signingPayload)
-                console.log(registry.hash)
                 const encoded = u8a.length > 256
                     ? blake2AsU8a(u8a)
                     : u8a;
@@ -158,19 +116,13 @@ function Profile() {
                 console.log("signature hex mutated", hexlify(signatureEcdsaU8))
                 console.log("signature buffer", toUtf8Bytes(signatureEcdsa).length)
 
-                //alice signature
-                //console.log(alice.sign)
-                //let signature1 = u8aToHex(alice.sign(encoded,{withType:true}));
-                //console.log(extrinsicPayload.inner.sign)
 
                 //create multi-signature
                 const multiSignature = api.createType("MultiSignature", {ecdsa: signatureEcdsaU8})
                 console.log("multiSignature", multiSignature.toHex())
-                const tx = construct.signedTx(unsigned, multiSignature.toHex(), {
-                    metadataRpc,
-                    registry,
-                });
-                const actualTxHash = await api.rpc.author.submitExtrinsic(tx);
+
+                apiTx.addSignature(substrateAdder, multiSignature.toHex(), signingPayload.toPayload());
+                await apiTx.send()
             } catch (error) {
                 console.log({ error })
             }
