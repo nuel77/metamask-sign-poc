@@ -79,17 +79,17 @@ function Profile() {
 
                 //create a wrapper transaction
                 await cryptoWaitReady();
-                const provider= new WsProvider("wss://polkadot.api.onfinality.io/public-ws")
+                const provider= new WsProvider("wss://mainnet.polkadex.trade")
                 const api = await ApiPromise.create({provider})
                 const compressPubicKey= secp256k1Compress(arrayify(publicKey))
                 console.log("compressed public key u8", arrayify(compressPubicKey))
                 console.log({compressPubicKey})
                 const accountId32 = blake2AsHex(compressPubicKey,256);
                 console.log("hash", accountId32)
-                const substrateAdder= encodeAddress(accountId32,0)
+                const substrateAdder= encodeAddress(accountId32,88)
                 console.log("substrate addr", substrateAdder);
 
-                const apiTx = api.tx.balances.transfer('5GNJqTPyNqANBkUVMN1LPPrxXnFouWXoe2wNSmmEoLctxiZY', 12345678)
+                const apiTx = api.tx.balances.transfer('5GNJqTPyNqANBkUVMN1LPPrxXnFouWXoe2wNSmmEoLctxiZY', 1234568)
                 const {nonce} = (await api.query.system.account(substrateAdder)).toJSON()
                 const signingPayload = api.createType('SignerPayload', {
                     method: apiTx,
