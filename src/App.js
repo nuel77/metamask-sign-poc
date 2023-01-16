@@ -79,8 +79,30 @@ function Profile() {
 
                 //create a wrapper transaction
                 await cryptoWaitReady();
-                const provider= new WsProvider("wss://mainnet.polkadex.trade")
-                const api = await ApiPromise.create({provider})
+                //polkadot.api.onfinality.io/public-ws
+                let signedExtensions = {
+                    ChargeTransactionPayment:{
+                        extrinsic: {
+                            signature_scheme:'u8',
+                            asset_id: 'Option<u128>',
+                            tip: 'Balance'
+                        },
+                        payload: {}
+                    }
+                }
+                const userExtensions = {
+                    ChargeTransactionPayment: {
+                        extrinsic: {
+                            signature_scheme: '1',
+                            asset_id: '1',
+                            tip:'1'
+                        },
+                        payload: {}
+                    }
+                }
+                const provider= new WsProvider("ws://127.0.0.1:9944")
+                const api = await ApiPromise.create({provider,signedExtensions})
+                api.registry.setSignedExtensions([],userExtensions)
                 const compressPubicKey= secp256k1Compress(arrayify(publicKey))
                 console.log("compressed public key u8", arrayify(compressPubicKey))
                 console.log({compressPubicKey})
@@ -89,18 +111,50 @@ function Profile() {
                 const substrateAdder= encodeAddress(accountId32,88)
                 console.log("substrate addr", substrateAdder);
 
-                const apiTx = api.tx.balances.transfer('5GNJqTPyNqANBkUVMN1LPPrxXnFouWXoe2wNSmmEoLctxiZY', 1234568)
+                const apiTx = api.tx.ocex.registerMainAccount('esqAtwszqNAFdyCQRQmCLCgWNP4zWLXVY4h7siAaRTgD4JvRw')
+                const keyring = new Keyring()
+                const alice=keyring.addFromUri("//Alice")
+                apiTx.signAndSend(alice,{} , ({ events = [], status }) => {
+                    console.log('Transaction status:', status.type);
+
+                    if (status.isInBlock) {
+                        console.log('Included at block hash', status.asInBlock.toHex());
+                        console.log('Events:');
+
+                        events.forEach(({ event: { data, method, section }, phase }) => {
+                            console.log('\t', phase.toString(), `: ${section}.${method}`, data.toString());
+                        });
+                    } else if (status.isFinalized) {
+                        console.log('Finalized block hash', status.asFinalized.toHex());
+
+                    }
+                });
+                return
                 const {nonce} = (await api.query.system.account(substrateAdder)).toJSON()
+                console.log("nonce", nonce)
                 const signingPayload = api.createType('SignerPayload', {
                     method: apiTx,
-                    nonce: nonce+1,
+                    nonce: nonce,
                     genesisHash: api.genesisHash,
                     blockHash: api.genesisHash,
                     runtimeVersion: api.runtimeVersion,
-                    version: api.extrinsicVersion
+                    version: api.extrinsicVersion,
+                    // signedExtensions:[{
+                    //     ChargeTransactionPayment:{
+                    //         extrinsic: {
+                    //             signature_scheme:'1',
+                    //             asset_id: '1',
+                    //             tip: '1'
+                    //         },
+                    //         payload: {}
+                    //     }
+                    // }]
                 });
+
+                console.log("signed extensions", signingPayload.signedExtensions.toJSON())
                 const extrinsicPayload = api.createType('ExtrinsicPayload', signingPayload.toPayload(), { version: api.extrinsicVersion })
                 const u8a = extrinsicPayload.toU8a({ method: true })
+
                 console.log("payload:", u8a);
                 console.log("signing payload", signingPayload)
                 const encoded = u8a.length > 256
@@ -108,6 +162,7 @@ function Profile() {
                     : u8a;
                 console.log("payloadHash", encoded.toString())
                 console.log("something", u8aToU8a(encoded).toString())
+                //TODO: wrap with v4 types
                 let signatureEcdsa = await web3.eth.sign(u8aToHex(blake2AsU8a(encoded)), accounts[0]);
                 console.log("signature ecdsa", signatureEcdsa)
                 const signatureEcdsaU8= arrayify(signatureEcdsa)
@@ -120,9 +175,37 @@ function Profile() {
                 //create multi-signature
                 const multiSignature = api.createType("MultiSignature", {ecdsa: signatureEcdsaU8})
                 console.log("multiSignature", multiSignature.toHex())
-
                 apiTx.addSignature(substrateAdder, multiSignature.toHex(), signingPayload.toPayload());
-                await apiTx.send()
+                await apiTx.send(({ status, events, dispatchError }) => {
+                    // status would still be set, but in the case of error we can shortcut
+                    // to just check it (so an error would indicate InBlock or Finalized)
+                    if (dispatchError) {
+                        if (dispatchError.isModule) {
+                            // for module errors, we have the section indexed, lookup
+                            const decoded = api.registry.findMetaError(dispatchError.asModule);
+                            const { docs, name, section } = decoded;
+
+                            const errMsg = `${section}.${name}: ${docs.join(" ")}`;
+                            console.log("error: ", errMsg)
+                        } else {
+                            // Other, CannotLookup, BadOrigin, no extra info
+                            const errMsg = dispatchError.toString();
+                            console.log("error: ", errMsg)
+                        }
+                    } else if (status.isInBlock) {
+                        handleExtrinsicErrors(events, api);
+                        const eventMessages = events.map(({ phase, event: { data, method, section } }) => {
+                            return `event:${phase} ${section} ${method}:: ${data}`;
+                        });
+                        console.log({ isSuccess: true, eventMessages, hash: apiTx.hash.toHex() });
+                    } else if (status.isFinalized) {
+                        handleExtrinsicErrors(events, api);
+                        const eventMessages = events.map(({ phase, event: { data, method, section } }) => {
+                            return `event:${phase} ${section} ${method}:: ${data}`;
+                        });
+                        console.log({ isSuccess: true, eventMessages, hash: apiTx.hash.toHex() });
+                    }
+                })
             } catch (error) {
                 console.log({ error })
             }
@@ -143,31 +226,26 @@ function Profile() {
         )
     return <button onClick={() => connect()}>Connect Wallet</button>
 }
-
-async function rpcToLocalNode(
-        method,
-        params = []
-    ) {
-        return fetch('http://1rpc.io/dot', {
-            body: JSON.stringify({
-                id: 1,
-                jsonrpc: '2.0',
-                method,
-                params,
-            }),
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            method: 'POST',
-        })
-            .then((response) => response.json())
-            .then(({ error, result }) => {
-                if (error) {
-                    throw new Error(
-                        `${error.code} ${error.message}: ${JSON.stringify(error.data)}`
-                    );
+export const handleExtrinsicErrors = (events, api) => {
+    events
+        // find/filter for failed events
+        .filter(({ event }) => api.events.system.ExtrinsicFailed.is(event))
+        // we know that data for system.ExtrinsicFailed is
+        // (DispatchError, DispatchInfo)
+        .forEach(
+            ({
+                 event: {
+                     data: [error],
+                 },
+             }) => {
+                if (error.isModule) {
+                    // for module errors, we have the section indexed, lookup
+                    const decoded = api.registry.findMetaError(error.asModule);
+                    const { docs, method, section } = decoded;
+                } else {
+                    // Other, CannotLookup, BadOrigin, no extra info
+                    console.log("log: ", error.toString());
                 }
-
-                return result;
-            });
-}
+            }
+        );
+};
