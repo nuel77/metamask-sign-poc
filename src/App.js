@@ -142,7 +142,7 @@ function Profile() {
                 //api.registry.setSignedExtensions([],signedExtensions)
                 // apiTx.addSignature(substrateAdder, multiSignature.toHex(), signingPayload.toPayload());
                 const signer = new mySigner({address:alice.address, signature:multiSignature.toU8a()})
-                apiTx.signAndSend(alice,
+                apiTx.signAndSend(substrateAdder,
                     {
                         signer,
                         tip:"1",
