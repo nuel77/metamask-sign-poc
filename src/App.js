@@ -74,14 +74,14 @@ function Profile() {
                 console.log("address: ",address)
 
                 //sign message using normal ecdsa
-                let normalSig = ec.sign(msgHash, keypair.getPrivate("hex"), "hex");
-                console.log("normal sig", {r:normalSig.r.toString(), s: normalSig.s.toString()})
+                // let normalSig = ec.sign(msgHash, keypair.getPrivate("hex"), "hex");
+                // console.log("normal sig", {r:normalSig.r.toString(), s: normalSig.s.toString()})
 
                 //create a wrapper transaction
                 await cryptoWaitReady();
                 //polkadot.api.onfinality.io/public-ws
                 let signedExtensions = {
-                    ChargeTransactionPayment:{
+                    AssetsTransactionPayment:{
                         extrinsic: {
                             signature_scheme:'u8',
                             asset_id: 'Option<u128>',
@@ -90,19 +90,8 @@ function Profile() {
                         payload: {}
                     }
                 }
-                const userExtensions = {
-                    ChargeTransactionPayment: {
-                        extrinsic: {
-                            signature_scheme: '1',
-                            asset_id: '1',
-                            tip:'1'
-                        },
-                        payload: {}
-                    }
-                }
                 const provider= new WsProvider("ws://127.0.0.1:9944")
                 const api = await ApiPromise.create({provider,signedExtensions})
-                api.registry.setSignedExtensions([],userExtensions)
                 const compressPubicKey= secp256k1Compress(arrayify(publicKey))
                 console.log("compressed public key u8", arrayify(compressPubicKey))
                 console.log({compressPubicKey})
@@ -114,22 +103,23 @@ function Profile() {
                 const apiTx = api.tx.ocex.registerMainAccount('esqAtwszqNAFdyCQRQmCLCgWNP4zWLXVY4h7siAaRTgD4JvRw')
                 const keyring = new Keyring()
                 const alice=keyring.addFromUri("//Alice")
-                apiTx.signAndSend(alice,{} , ({ events = [], status }) => {
-                    console.log('Transaction status:', status.type);
-
-                    if (status.isInBlock) {
-                        console.log('Included at block hash', status.asInBlock.toHex());
-                        console.log('Events:');
-
-                        events.forEach(({ event: { data, method, section }, phase }) => {
-                            console.log('\t', phase.toString(), `: ${section}.${method}`, data.toString());
-                        });
-                    } else if (status.isFinalized) {
-                        console.log('Finalized block hash', status.asFinalized.toHex());
-
-                    }
-                });
-                return
+                //order of registry setting matters.
+                //api.registry.setSignedExtensions([],userExtensions)
+                // apiTx.signAndSend(alice.address ,{signer: mySigner, assetId:"1"},({ events = [], status }) => {
+                //     console.log('Transaction status:', status.type);
+                //
+                //     if (status.isInBlock) {
+                //         console.log('Included at block hash', status.asInBlock.toHex());
+                //         console.log('Events:');
+                //
+                //         events.forEach(({ event: { data, method, section }, phase }) => {
+                //             console.log('\t', phase.toString(), `: ${section}.${method}`, data.toString());
+                //         });
+                //     } else if (status.isFinalized) {
+                //         console.log('Finalized block hash', status.asFinalized.toHex());
+                //
+                //     }
+                // });
                 const {nonce} = (await api.query.system.account(substrateAdder)).toJSON()
                 console.log("nonce", nonce)
                 const signingPayload = api.createType('SignerPayload', {
@@ -161,9 +151,9 @@ function Profile() {
                     ? blake2AsU8a(u8a)
                     : u8a;
                 console.log("payloadHash", encoded.toString())
-                console.log("something", u8aToU8a(encoded).toString())
                 //TODO: wrap with v4 types
-                let signatureEcdsa = await web3.eth.sign(u8aToHex(blake2AsU8a(encoded)), accounts[0]);
+                const data= getPayloadV3(u8aToHex(blake2AsU8a(encoded)))
+                let signatureEcdsa = await signPayloadV3(web3, accounts[0],data );
                 console.log("signature ecdsa", signatureEcdsa)
                 const signatureEcdsaU8= arrayify(signatureEcdsa)
                 signatureEcdsaU8[signatureEcdsaU8.length-1]-=27;
@@ -175,37 +165,52 @@ function Profile() {
                 //create multi-signature
                 const multiSignature = api.createType("MultiSignature", {ecdsa: signatureEcdsaU8})
                 console.log("multiSignature", multiSignature.toHex())
-                apiTx.addSignature(substrateAdder, multiSignature.toHex(), signingPayload.toPayload());
-                await apiTx.send(({ status, events, dispatchError }) => {
-                    // status would still be set, but in the case of error we can shortcut
-                    // to just check it (so an error would indicate InBlock or Finalized)
-                    if (dispatchError) {
-                        if (dispatchError.isModule) {
-                            // for module errors, we have the section indexed, lookup
-                            const decoded = api.registry.findMetaError(dispatchError.asModule);
-                            const { docs, name, section } = decoded;
+                // apiTx.addSignature(substrateAdder, multiSignature.toHex(), signingPayload.toPayload());
+                apiTx.signAndSend(alice.address ,{signer: new mySigner(multiSignature.toHex()), assetId:"1"},({ events = [], status }) => {
+                    console.log('Transaction status:', status.type);
 
-                            const errMsg = `${section}.${name}: ${docs.join(" ")}`;
-                            console.log("error: ", errMsg)
-                        } else {
-                            // Other, CannotLookup, BadOrigin, no extra info
-                            const errMsg = dispatchError.toString();
-                            console.log("error: ", errMsg)
-                        }
-                    } else if (status.isInBlock) {
-                        handleExtrinsicErrors(events, api);
-                        const eventMessages = events.map(({ phase, event: { data, method, section } }) => {
-                            return `event:${phase} ${section} ${method}:: ${data}`;
+                    if (status.isInBlock) {
+                        console.log('Included at block hash', status.asInBlock.toHex());
+                        console.log('Events:');
+
+                        events.forEach(({ event: { data, method, section }, phase }) => {
+                            console.log('\t', phase.toString(), `: ${section}.${method}`, data.toString());
                         });
-                        console.log({ isSuccess: true, eventMessages, hash: apiTx.hash.toHex() });
                     } else if (status.isFinalized) {
-                        handleExtrinsicErrors(events, api);
-                        const eventMessages = events.map(({ phase, event: { data, method, section } }) => {
-                            return `event:${phase} ${section} ${method}:: ${data}`;
-                        });
-                        console.log({ isSuccess: true, eventMessages, hash: apiTx.hash.toHex() });
+                        console.log('Finalized block hash', status.asFinalized.toHex());
+
                     }
-                })
+                });
+                // await apiTx.send(({ status, events, dispatchError }) => {
+                //     // status would still be set, but in the case of error we can shortcut
+                //     // to just check it (so an error would indicate InBlock or Finalized)
+                //     if (dispatchError) {
+                //         if (dispatchError.isModule) {
+                //             // for module errors, we have the section indexed, lookup
+                //             const decoded = api.registry.findMetaError(dispatchError.asModule);
+                //             const { docs, name, section } = decoded;
+                //
+                //             const errMsg = `${section}.${name}: ${docs.join(" ")}`;
+                //             console.log("error: ", errMsg)
+                //         } else {
+                //             // Other, CannotLookup, BadOrigin, no extra info
+                //             const errMsg = dispatchError.toString();
+                //             console.log("error: ", errMsg)
+                //         }
+                //     } else if (status.isInBlock) {
+                //         handleExtrinsicErrors(events, api);
+                //         const eventMessages = events.map(({ phase, event: { data, method, section } }) => {
+                //             return `event:${phase} ${section} ${method}:: ${data}`;
+                //         });
+                //         console.log({ isSuccess: true, eventMessages, hash: apiTx.hash.toHex() });
+                //     } else if (status.isFinalized) {
+                //         handleExtrinsicErrors(events, api);
+                //         const eventMessages = events.map(({ phase, event: { data, method, section } }) => {
+                //             return `event:${phase} ${section} ${method}:: ${data}`;
+                //         });
+                //         console.log({ isSuccess: true, eventMessages, hash: apiTx.hash.toHex() });
+                //     }
+                // })
             } catch (error) {
                 console.log({ error })
             }
@@ -249,3 +254,64 @@ export const handleExtrinsicErrors = (events, api) => {
             }
         );
 };
+
+const signPayloadV3 = (web3, account, data)=>{
+    console.log("signPayload", data)
+    return new Promise((resolve,reject)=>{
+        web3.currentProvider.sendAsync(
+            {
+                method: "eth_signTypedData_v3",
+                params: [account, data],
+                from: account
+            },
+            function(err, result) {
+                if (err) {
+                    reject(err)
+                }
+                resolve(result.result)
+                const signature = result.result.substring(2);
+                const r = "0x" + signature.substring(0, 64);
+                const s = "0x" + signature.substring(64, 128);
+                const v = parseInt(signature.substring(128, 130), 16);
+                // The signature is now comprised of r, s, and v.
+                console.log({r,s,v})
+            }
+        );
+    })
+}
+
+const getPayloadV3 = (txhash)=>{
+    const domain = [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+    ];
+    const Tx = [
+        { name: "Transaction", type: "string" },
+    ];
+    const domainData = {
+        name: "THEA by Polkadex",
+        version: "2",
+    };
+    let message = {
+        Transaction: txhash,
+    }
+    return JSON.stringify({
+        types: {
+            EIP712Domain: domain,
+            Tx: Tx,
+        },
+        domain: domainData,
+        primaryType: "Tx",
+        message: message
+    });
+}
+
+class mySigner {
+    signature
+    constructor(signature) {
+        this.signature=signature
+    }
+    async signPayload(payload){
+        return {signature:this.signature}
+    }
+}
