@@ -103,41 +103,7 @@ function Profile() {
                 const keyring = new Keyring()
                 const alice=keyring.addFromUri("//Alice")
 
-                const tx = api.tx.ocex.registerMainAccount('esqAtwszqNAFdyCQRQmCLCgWNP4zWLXVY4h7siAaRTgD4JvRw')
-                tx.signAndSend(alice, {tip:"1", asset_id:"2", signature_scheme:"3"}, ({ events = [], status }) => {
-                    console.log('Transaction status:', status.type);
-
-                    if (status.isInBlock) {
-                        console.log('Included at block hash', status.asInBlock.toHex());
-                        console.log('Events:');
-
-                        events.forEach(({ event: { data, method, section }, phase }) => {
-                            console.log('\t', phase.toString(), `: ${section}.${method}`, data.toString());
-                        });
-                    } else if (status.isFinalized) {
-                        console.log('Finalized block hash', status.asFinalized.toHex());
-
-                    }
-                });
-                return;
                 const apiTx = api.tx.ocex.registerMainAccount('esqAtwszqNAFdyCQRQmCLCgWNP4zWLXVY4h7siAaRTgD4JvRw')
-                //order of registry setting matters.
-                //api.registry.setSignedExtensions([],userExtensions)
-                // apiTx.signAndSend(alice.address ,{signer: mySigner, assetId:"1"},({ events = [], status }) => {
-                //     console.log('Transaction status:', status.type);
-                //
-                //     if (status.isInBlock) {
-                //         console.log('Included at block hash', status.asInBlock.toHex());
-                //         console.log('Events:');
-                //
-                //         events.forEach(({ event: { data, method, section }, phase }) => {
-                //             console.log('\t', phase.toString(), `: ${section}.${method}`, data.toString());
-                //         });
-                //     } else if (status.isFinalized) {
-                //         console.log('Finalized block hash', status.asFinalized.toHex());
-                //
-                //     }
-                // });
                 const {nonce} = (await api.query.system.account(substrateAdder)).toJSON()
                 console.log("nonce", nonce)
                 const signingPayload = api.createType('SignerPayload', {
@@ -147,7 +113,6 @@ function Profile() {
                     blockHash: api.genesisHash,
                     runtimeVersion: api.runtimeVersion,
                     version: api.extrinsicVersion,
-                    signedExtensions:api.registry.signedExtensions
                 });
 
                 console.log("signed extensions", api.registry.signedExtensions)
@@ -176,11 +141,13 @@ function Profile() {
                 console.log("multiSignature", multiSignature.toHex())
                 //api.registry.setSignedExtensions([],signedExtensions)
                 // apiTx.addSignature(substrateAdder, multiSignature.toHex(), signingPayload.toPayload());
-                tx.signAndSend(alice,
+                const signer = new mySigner({address:alice.address, signature:multiSignature.toU8a()})
+                apiTx.signAndSend(alice,
                     {
+                        signer,
                         tip:"1",
-                        asset_id:"3",
-                        signature_scheme:"1"
+                        asset_id:"2",
+                        signature_scheme:"3"
                     },
                     ({ events = [], status }) => {
                     console.log('Transaction status:', status.type);
@@ -197,36 +164,6 @@ function Profile() {
 
                     }
                 });
-                // await apiTx.send(({ status, events, dispatchError }) => {
-                //     // status would still be set, but in the case of error we can shortcut
-                //     // to just check it (so an error would indicate InBlock or Finalized)
-                //     if (dispatchError) {
-                //         if (dispatchError.isModule) {
-                //             // for module errors, we have the section indexed, lookup
-                //             const decoded = api.registry.findMetaError(dispatchError.asModule);
-                //             const { docs, name, section } = decoded;
-                //
-                //             const errMsg = `${section}.${name}: ${docs.join(" ")}`;
-                //             console.log("error: ", errMsg)
-                //         } else {
-                //             // Other, CannotLookup, BadOrigin, no extra info
-                //             const errMsg = dispatchError.toString();
-                //             console.log("error: ", errMsg)
-                //         }
-                //     } else if (status.isInBlock) {
-                //         handleExtrinsicErrors(events, api);
-                //         const eventMessages = events.map(({ phase, event: { data, method, section } }) => {
-                //             return `event:${phase} ${section} ${method}:: ${data}`;
-                //         });
-                //         console.log({ isSuccess: true, eventMessages, hash: apiTx.hash.toHex() });
-                //     } else if (status.isFinalized) {
-                //         handleExtrinsicErrors(events, api);
-                //         const eventMessages = events.map(({ phase, event: { data, method, section } }) => {
-                //             return `event:${phase} ${section} ${method}:: ${data}`;
-                //         });
-                //         console.log({ isSuccess: true, eventMessages, hash: apiTx.hash.toHex() });
-                //     }
-                // })
             } catch (error) {
                 console.log({ error })
             }
@@ -247,30 +184,6 @@ function Profile() {
         )
     return <button onClick={() => connect()}>Connect Wallet</button>
 }
-export const handleExtrinsicErrors = (events, api) => {
-    events
-        // find/filter for failed events
-        .filter(({ event }) => api.events.system.ExtrinsicFailed.is(event))
-        // we know that data for system.ExtrinsicFailed is
-        // (DispatchError, DispatchInfo)
-        .forEach(
-            ({
-                 event: {
-                     data: [error],
-                 },
-             }) => {
-                if (error.isModule) {
-                    // for module errors, we have the section indexed, lookup
-                    const decoded = api.registry.findMetaError(error.asModule);
-                    const { docs, method, section } = decoded;
-                } else {
-                    // Other, CannotLookup, BadOrigin, no extra info
-                    console.log("log: ", error.toString());
-                }
-            }
-        );
-};
-
 const signPayloadV3 = (web3, account, data)=>{
     console.log("signPayload", data)
     return new Promise((resolve,reject)=>{
@@ -324,12 +237,17 @@ const getPayloadV3 = (txhash)=>{
     });
 }
 
-class mySigner {
+class mySigner  {
     signature
-    constructor(signature) {
+    address
+    constructor({address, signature}) {
         this.signature=signature
+        this.address=address
     }
-    async signPayload(payload){
-        return {signature:this.signature}
+    async signPayload(val){
+        return {id: 1, signature: this.signature}
+    }
+    async signRaw(val){
+        return {id: 1, signature: this.signature}
     }
 }
