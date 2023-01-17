@@ -141,7 +141,7 @@ function Profile() {
                 console.log("multiSignature", multiSignature.toHex())
                 //api.registry.setSignedExtensions([],signedExtensions)
                 // apiTx.addSignature(substrateAdder, multiSignature.toHex(), signingPayload.toPayload());
-                const signer = new mySigner({address:alice.address, signature:multiSignature.toU8a()})
+                const signer = new mySigner({address:substrateAdder, signature:multiSignature.toU8a()})
                 apiTx.signAndSend(substrateAdder,
                     {
                         signer,
