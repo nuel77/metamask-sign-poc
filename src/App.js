@@ -83,9 +83,9 @@ function Profile() {
                 let signedExtensions = {
                     AssetsTransactionPayment:{
                         extrinsic: {
-                            signature_scheme:'u8',
                             asset_id: 'Option<u128>',
-                            tip: 'Balance'
+                            tip: 'Balance',
+                            signature_scheme:'u8',
                         },
                         payload: {}
                     }
@@ -100,9 +100,27 @@ function Profile() {
                 const substrateAdder= encodeAddress(accountId32,88)
                 console.log("substrate addr", substrateAdder);
 
-                const apiTx = api.tx.ocex.registerMainAccount('esqAtwszqNAFdyCQRQmCLCgWNP4zWLXVY4h7siAaRTgD4JvRw')
                 const keyring = new Keyring()
                 const alice=keyring.addFromUri("//Alice")
+
+                const tx = api.tx.ocex.registerMainAccount('esqAtwszqNAFdyCQRQmCLCgWNP4zWLXVY4h7siAaRTgD4JvRw')
+                tx.signAndSend(alice, {tip:"1", asset_id:"2", signature_scheme:"3"}, ({ events = [], status }) => {
+                    console.log('Transaction status:', status.type);
+
+                    if (status.isInBlock) {
+                        console.log('Included at block hash', status.asInBlock.toHex());
+                        console.log('Events:');
+
+                        events.forEach(({ event: { data, method, section }, phase }) => {
+                            console.log('\t', phase.toString(), `: ${section}.${method}`, data.toString());
+                        });
+                    } else if (status.isFinalized) {
+                        console.log('Finalized block hash', status.asFinalized.toHex());
+
+                    }
+                });
+                return;
+                const apiTx = api.tx.ocex.registerMainAccount('esqAtwszqNAFdyCQRQmCLCgWNP4zWLXVY4h7siAaRTgD4JvRw')
                 //order of registry setting matters.
                 //api.registry.setSignedExtensions([],userExtensions)
                 // apiTx.signAndSend(alice.address ,{signer: mySigner, assetId:"1"},({ events = [], status }) => {
@@ -129,19 +147,10 @@ function Profile() {
                     blockHash: api.genesisHash,
                     runtimeVersion: api.runtimeVersion,
                     version: api.extrinsicVersion,
-                    // signedExtensions:[{
-                    //     ChargeTransactionPayment:{
-                    //         extrinsic: {
-                    //             signature_scheme:'1',
-                    //             asset_id: '1',
-                    //             tip: '1'
-                    //         },
-                    //         payload: {}
-                    //     }
-                    // }]
+                    signedExtensions:api.registry.signedExtensions
                 });
 
-                console.log("signed extensions", signingPayload.signedExtensions.toJSON())
+                console.log("signed extensions", api.registry.signedExtensions)
                 const extrinsicPayload = api.createType('ExtrinsicPayload', signingPayload.toPayload(), { version: api.extrinsicVersion })
                 const u8a = extrinsicPayload.toU8a({ method: true })
 
@@ -165,8 +174,15 @@ function Profile() {
                 //create multi-signature
                 const multiSignature = api.createType("MultiSignature", {ecdsa: signatureEcdsaU8})
                 console.log("multiSignature", multiSignature.toHex())
+                //api.registry.setSignedExtensions([],signedExtensions)
                 // apiTx.addSignature(substrateAdder, multiSignature.toHex(), signingPayload.toPayload());
-                apiTx.signAndSend(alice.address ,{signer: new mySigner(multiSignature.toHex()), assetId:"1"},({ events = [], status }) => {
+                tx.signAndSend(alice,
+                    {
+                        tip:"1",
+                        asset_id:"3",
+                        signature_scheme:"1"
+                    },
+                    ({ events = [], status }) => {
                     console.log('Transaction status:', status.type);
 
                     if (status.isInBlock) {
@@ -284,6 +300,7 @@ const getPayloadV3 = (txhash)=>{
     const domain = [
         { name: "name", type: "string" },
         { name: "version", type: "string" },
+        { name:"verifyingContract", type:"string"}
     ];
     const Tx = [
         { name: "Transaction", type: "string" },
@@ -291,6 +308,7 @@ const getPayloadV3 = (txhash)=>{
     const domainData = {
         name: "THEA by Polkadex",
         version: "2",
+        verifyingContract: "0xF59ae934f6fe444afC309586cC60a84a0F89Aaea"
     };
     let message = {
         Transaction: txhash,
