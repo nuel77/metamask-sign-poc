@@ -57,11 +57,11 @@ function Profile() {
 
                 const web3= new Web3(Web3.givenProvider)
                 let accounts = await web3.eth.getAccounts();
-                let msg = "Some data"
+                let msg = "Polkadex-THEA"
                 let prefix = "\x19Ethereum Signed Message:\n" + msg.length
                 let msgHash = web3.utils.sha3(prefix+msg)
                 //sign message with metamask
-                let sig1 = await web3.eth.sign(msgHash, accounts[0]);
+                let sig1 = await web3.eth.personal.sign(msg, accounts[0]);
                 console.log("initial signature", sig1)
                 const sigObject= splitSignature(sig1)
                 console.log("sig Object", sigObject)
