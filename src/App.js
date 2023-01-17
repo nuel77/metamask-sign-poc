@@ -9,6 +9,9 @@ import {
     cryptoWaitReady, secp256k1Compress,
     evmToAddress, encodeAddress, blake2AsU8a,
 } from '@polkadot/util-crypto';
+import { web3Accounts, web3Enable, web3FromAddress } from '@polkadot/extension-dapp';
+
+
 import {
     construct, createMetadata, getRegistry,
     methods,
@@ -25,6 +28,8 @@ import {
 } from "ethers/lib/utils";
 import {fromRpcSig, toCompactSig} from "ethereumjs-util";
 import {hexToU8a, u8aToHex, u8aToU8a} from "@polkadot/util";
+import {H256} from "@polkadot/types/interfaces/runtime";
+import {ISubmittableResult} from "@polkadot/types/types/extrinsic";
 let elliptic = require('elliptic');
 let ec = new elliptic.ec('secp256k1');
 
@@ -50,6 +55,9 @@ function Profile() {
     const handleClick = async ()=>{
         if (window.ethereum) {
             try {
+                const allInjected = await web3Enable('my cool dapp');
+                const allAccounts = await web3Accounts();
+                const injector = await web3FromAddress(allAccounts[0].address);
                 const p="0xa40503008eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a480700e40b540255000000542400000f00000091b171bb158e2d3848fa23a9f1c25182fb8e20313b2c1eb49219da7a70ce90c37376af6d9cf5711c3a644470a092988aa35ad34900b1dc29bd1771e4c751656f"
                 console.log("blake hash", blake2AsU8a(p,256))
                 const privateKey= "0f5315135dffad49c9422d8368865c13c5dbdeed31405aad96214c6b71f11fcc"
@@ -83,7 +91,7 @@ function Profile() {
                 let signedExtensions = {
                     AssetsTransactionPayment:{
                         extrinsic: {
-                            asset_id: 'Option<u128>',
+                            asset_id: 'u128',
                             tip: 'Balance',
                             signature_scheme:'u8',
                         },
@@ -141,13 +149,13 @@ function Profile() {
                 console.log("multiSignature", multiSignature.toHex())
                 //api.registry.setSignedExtensions([],signedExtensions)
                 // apiTx.addSignature(substrateAdder, multiSignature.toHex(), signingPayload.toPayload());
-                const signer = new mySigner({address:substrateAdder, signature:multiSignature.toU8a()})
+                const signer = new mySigner({address:alice.address, signature:multiSignature.toU8a()})
                 apiTx.signAndSend(substrateAdder,
                     {
-                        signer,
-                        tip:"1",
-                        asset_id:"2",
-                        signature_scheme:"3"
+                        signer:signer,
+                        asset_id:"340282366920938463463374607431768211455",
+                        tip:"340282366920938463463374607431768211455",
+                        signature_scheme:"255"
                     },
                     ({ events = [], status }) => {
                     console.log('Transaction status:', status.type);
@@ -250,4 +258,8 @@ class mySigner  {
     async signRaw(val){
         return {id: 1, signature: this.signature}
     }
+    async update (id, status ) {
+        console.log({id,status})
+        return;
+    };
 }
