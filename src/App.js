@@ -27,23 +27,23 @@ import {
     toUtf8Bytes
 } from "ethers/lib/utils";
 import {fromRpcSig, toCompactSig} from "ethereumjs-util";
-import {hexToU8a, u8aToHex, u8aToU8a} from "@polkadot/util";
+import {hexToU8a, u8aConcat, u8aToHex, u8aToU8a} from "@polkadot/util";
 import {H256} from "@polkadot/types/interfaces/runtime";
 import {ISubmittableResult} from "@polkadot/types/types/extrinsic";
 let elliptic = require('elliptic');
 let ec = new elliptic.ec('secp256k1');
 
 const client = createClient({
-  autoConnect: true,
-  provider: getDefaultProvider(),
+    autoConnect: true,
+    provider: getDefaultProvider(),
 })
 
 export default function App() {
-  return (
-      <WagmiConfig client={client}>
-        <Profile />
-      </WagmiConfig>
-  )
+    return (
+        <WagmiConfig client={client}>
+            <Profile />
+        </WagmiConfig>
+    )
 }
 
 function Profile() {
@@ -111,7 +111,7 @@ function Profile() {
                 const keyring = new Keyring()
                 const alice=keyring.addFromUri("//Alice")
 
-                const apiTx = api.tx.ocex.registerMainAccount('esqAtwszqNAFdyCQRQmCLCgWNP4zWLXVY4h7siAaRTgD4JvRw')
+                const apiTx = api.tx.system.remark('esqAtwszqNAFdyCQRQmCLCgWNP4zWLXVY4h7siAaRTgD4JvRw')
                 const {nonce} = (await api.query.system.account(substrateAdder)).toJSON()
                 console.log("nonce", nonce)
                 const signingPayload = api.createType('SignerPayload', {
@@ -124,54 +124,59 @@ function Profile() {
                 });
 
                 console.log("signed extensions", api.registry.signedExtensions)
-                const extrinsicPayload = api.createType('ExtrinsicPayload', signingPayload.toPayload(), { version: api.extrinsicVersion })
-                const u8a = extrinsicPayload.toU8a({ method: true })
 
-                console.log("payload:", u8a);
-                console.log("signing payload", signingPayload)
-                const encoded = u8a.length > 256
-                    ? blake2AsU8a(u8a)
-                    : u8a;
-                console.log("payloadHash", encoded.toString())
-                //TODO: wrap with v4 types
-                const data= getPayloadV3(u8aToHex(blake2AsU8a(encoded)))
-                let signatureEcdsa = await signPayloadV3(web3, accounts[0],data );
-                console.log("signature ecdsa", signatureEcdsa)
-                const signatureEcdsaU8= arrayify(signatureEcdsa)
-                signatureEcdsaU8[signatureEcdsaU8.length-1]-=27;
-                console.log("signature u8 mutated", signatureEcdsaU8)
-                console.log("signature hex mutated", hexlify(signatureEcdsaU8))
-                console.log("signature buffer", toUtf8Bytes(signatureEcdsa).length)
+                const signerHelper = async (signingPayload) => {
+                    const extrinsicPayload = api.createType('ExtrinsicPayload', signingPayload, { version: api.extrinsicVersion });
+                    console.log("signing payload", signingPayload)       ;
+                    const u8a = extrinsicPayload.toU8a({ method: true })
+                    console.log("payload:", u8a.length);
+                    let encoded = u8a.length > 256
+                        ? blake2AsU8a(u8a)
+                        : u8a;
+                    encoded = u8aConcat(encoded,new Uint8Array([1]) )
+                    //add signature scheme
+                    console.log("encoded= ", encoded)
+                    //TODO: wrap with v4 types
 
+                    const {dataStr:data, dataJson}= getPayloadV3(u8aToHex(encoded));
+                    let signatureEcdsa = await signPayloadV3(web3, accounts[0],data );
+                    console.log("signature ecdsa", signatureEcdsa)
+                    const signatureEcdsaU8= arrayify(signatureEcdsa)
+                    signatureEcdsaU8[signatureEcdsaU8.length-1]-=27;
+                    console.log("signature u8 mutated", signatureEcdsaU8)
+                    console.log("signature hex mutated", hexlify(signatureEcdsaU8))
+                    console.log("signature buffer", toUtf8Bytes(signatureEcdsa).length)
 
-                //create multi-signature
-                const multiSignature = api.createType("MultiSignature", {ecdsa: signatureEcdsaU8})
-                console.log("multiSignature", multiSignature.toHex())
+                    //create multi-signature
+                    const multiSignature = api.createType("MultiSignature", {ecdsa: signatureEcdsaU8})
+                    return multiSignature.toU8a();
+                }
+
                 //api.registry.setSignedExtensions([],signedExtensions)
                 // apiTx.addSignature(substrateAdder, multiSignature.toHex(), signingPayload.toPayload());
-                const signer = new mySigner({address:alice.address, signature:multiSignature.toU8a()})
+                const signer = new mySigner({address:alice.address, signer:signerHelper})
                 apiTx.signAndSend(substrateAdder,
                     {
                         signer:signer,
-                        asset_id:"340282366920938463463374607431768211455",
-                        tip:"340282366920938463463374607431768211455",
-                        signature_scheme:"255"
+                        asset_id:"1",
+                        tip:"1",
+                        signature_scheme:"1"
                     },
                     ({ events = [], status }) => {
-                    console.log('Transaction status:', status.type);
+                        console.log('Transaction status:', status.type);
 
-                    if (status.isInBlock) {
-                        console.log('Included at block hash', status.asInBlock.toHex());
-                        console.log('Events:');
+                        if (status.isInBlock) {
+                            console.log('Included at block hash', status.asInBlock.toHex());
+                            console.log('Events:');
 
-                        events.forEach(({ event: { data, method, section }, phase }) => {
-                            console.log('\t', phase.toString(), `: ${section}.${method}`, data.toString());
-                        });
-                    } else if (status.isFinalized) {
-                        console.log('Finalized block hash', status.asFinalized.toHex());
+                            events.forEach(({ event: { data, method, section }, phase }) => {
+                                console.log('\t', phase.toString(), `: ${section}.${method}`, data.toString());
+                            });
+                        } else if (status.isFinalized) {
+                            console.log('Finalized block hash', status.asFinalized.toHex());
 
-                    }
-                });
+                        }
+                    });
             } catch (error) {
                 console.log({ error })
             }
@@ -180,14 +185,14 @@ function Profile() {
     if (isConnected)
         return (
             <>
-            <div>
-                Connected to {address}
-                <button onClick={() => disconnect()}>Disconnect</button>
-            </div>
-            <div>
-                Send transfer
-                <button onClick={handleClick}>Send transfer</button>
-            </div>
+                <div>
+                    Connected to {address}
+                    <button onClick={() => disconnect()}>Disconnect</button>
+                </div>
+                <div>
+                    Send transfer
+                    <button onClick={handleClick}>Send transfer</button>
+                </div>
             </>
         )
     return <button onClick={() => connect()}>Connect Wallet</button>
@@ -216,50 +221,61 @@ const signPayloadV3 = (web3, account, data)=>{
         );
     })
 }
-
 const getPayloadV3 = (txhash)=>{
+    console.log("salt" + getSalt())
     const domain = [
         { name: "name", type: "string" },
         { name: "version", type: "string" },
-        { name:"verifyingContract", type:"string"}
+        { name: "chainId" , type: "uint256"},
+        { name: "verifyingContract", type: "address"},
+        { name: "salt", type: "bytes32"}
     ];
-    const Tx = [
-        { name: "Transaction", type: "string" },
+    const EthereumSignerPayload = [
+        { name: "transaction", type: "string" },
     ];
     const domainData = {
-        name: "THEA by Polkadex",
-        version: "2",
-        verifyingContract: "0xF59ae934f6fe444afC309586cC60a84a0F89Aaea"
+        name: "Polkadex Transaction",
+        version: "3",
+        chainId : 1,
+        verifyingContract : "0x0000000000000000000000000000000000000001",
+        salt: getSalt()
     };
     let message = {
-        Transaction: txhash,
+        transaction: txhash,
     }
-    return JSON.stringify({
+    const data = {
         types: {
             EIP712Domain: domain,
-            Tx: Tx,
+            EthereumSignerPayload: EthereumSignerPayload,
         },
         domain: domainData,
-        primaryType: "Tx",
+        primaryType: "EthereumSignerPayload",
         message: message
-    });
+    };
+    return {dataStr:JSON.stringify(data), dataJson:data}
 }
 
 class mySigner  {
-    signature
+    signer
     address
-    constructor({address, signature}) {
-        this.signature=signature
+    constructor({address, signer}) {
+        this.signer=signer
         this.address=address
     }
-    async signPayload(val){
-        return {id: 1, signature: this.signature}
+    async signPayload(payload){
+        const sig= await this.signer(payload);
+        return {id: 1, signature: sig}
     }
     async signRaw(val){
-        return {id: 1, signature: this.signature}
+        return {id: 1, signature: await this.signer(val)}
     }
     async update (id, status ) {
         console.log({id,status})
         return;
     };
+}
+
+const getSalt= ()=>{
+    let s= new Uint8Array([74, 70, 19, 182, 2, 77, 52, 166, 170, 200, 37, 169, 110, 153, 241, 72, 11, 229, 252, 40, 244, 207, 231, 54, 251, 170, 208, 69, 127, 91, 161, 229])
+    return u8aToHex(s);
 }
