@@ -45,7 +45,18 @@ export default function App() {
         </WagmiConfig>
     )
 }
-
+const ExtrinsicPayloadPolkadex={
+    asset_id:"u128",
+    blockHash:"BlockHash",
+    era: "ExtrinsicEra",
+    genesisHash: "BlockHash",
+    method:"Bytes",
+    nonce:"Index",
+    signature_scheme: "u128",
+    specVersion:"u32",
+    tip:"Balance",
+    transactionVersion:"u32",
+}
 function Profile() {
     const { address, isConnected } = useAccount()
     const { connect } = useConnect({
@@ -94,12 +105,18 @@ function Profile() {
                             asset_id: 'u128',
                             tip: 'Balance',
                             signature_scheme:'u8',
+
                         },
-                        payload: {}
+                        payload: {
+                            scheme:'u8'
+                        }
                     }
                 }
                 const provider= new WsProvider("ws://127.0.0.1:9944")
+                //
+                // // await injector.metadata.provide({userExtensions:signedExtensions})
                 const api = await ApiPromise.create({provider,signedExtensions})
+                console.log("here2")
                 const compressPubicKey= secp256k1Compress(arrayify(publicKey))
                 console.log("compressed public key u8", arrayify(compressPubicKey))
                 console.log({compressPubicKey})
@@ -114,26 +131,20 @@ function Profile() {
                 const apiTx = api.tx.system.remark('esqAtwszqNAFdyCQRQmCLCgWNP4zWLXVY4h7siAaRTgD4JvRw')
                 const {nonce} = (await api.query.system.account(substrateAdder)).toJSON()
                 console.log("nonce", nonce)
-                const signingPayload = api.createType('SignerPayload', {
-                    method: apiTx,
-                    nonce: nonce,
-                    genesisHash: api.genesisHash,
-                    blockHash: api.genesisHash,
-                    runtimeVersion: api.runtimeVersion,
-                    version: api.extrinsicVersion,
-                });
-
-                console.log("signed extensions", api.registry.signedExtensions)
+                console.log("registry", api.registry)
 
                 const signerHelper = async (signingPayload) => {
-                    const extrinsicPayload = api.createType('ExtrinsicPayload', signingPayload, { version: api.extrinsicVersion });
-                    console.log("signing payload", signingPayload)       ;
-                    const u8a = extrinsicPayload.toU8a({ method: true })
+                    console.log("signingPayload", signingPayload)
+                    const extrinsicPayload = api.registry.createType('ExtrinsicPayload', signingPayload, { version: signingPayload.version});
+                    console.log("extrinsic version", extrinsicPayload.specVersion.toHuman())
+                    console.log("extrinsic payload", api.registry.getSignedExtensionExtra());
+                    let u8a = extrinsicPayload.toU8a({method:true});
+                    let encoded = u8a.length > 256 ? api.registry.hash(u8a) : u8a;
                     console.log("payload:", u8a.length);
-                    let encoded = u8a.length > 256
-                        ? blake2AsU8a(u8a)
-                        : u8a;
-                    encoded = u8aConcat(encoded,new Uint8Array([1]) )
+                    // let encoded = u8a.length > 256
+                    //     ? blake2AsU8a(u8a)
+                    //     : u8a;
+                   // encoded = u8aConcat(encoded,new Uint8Array([1]) )
                     //add signature scheme
                     console.log("encoded= ", encoded)
                     //TODO: wrap with v4 types
@@ -158,9 +169,10 @@ function Profile() {
                 apiTx.signAndSend(substrateAdder,
                     {
                         signer:signer,
-                        asset_id:"1",
+                        asset_id:"0",
                         tip:"1",
-                        signature_scheme:"1"
+                        signature_scheme:"1",
+                        scheme:"1"
                     },
                     ({ events = [], status }) => {
                         console.log('Transaction status:', status.type);
